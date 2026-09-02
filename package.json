@@ -29,15 +29,13 @@
   },
   "exports": {
     ".": {
-      "types": "./lib/typescript/index.d.ts",
-      "import": "./lib/module/index.js",
-      "default": "./lib/module/index.js"
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
     },
     "./package.json": "./package.json"
   },
-  "main": "lib/module/index.js",
-  "module": "lib/module/index.js",
-  "types": "lib/typescript/index.d.ts",
+  "main": "src/index.ts",
+  "module": "src/index.ts",
   "files": [
     "*.podspec",
     "LICENSE",
