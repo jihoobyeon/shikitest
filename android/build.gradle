@@ -1,0 +1,177 @@
+buildscript {
+  // Buildscript is evaluated before everything else so we can't use getExtOrDefault
+  def kotlin_version = rootProject.ext.has("kotlinVersion") ? rootProject.ext.get("kotlinVersion") : project.properties["ShikiEngine_kotlinVersion"]
+
+  if (project == rootProject) {
+    repositories {
+      google()
+      mavenCentral()
+    }
+
+    dependencies {
+      classpath "com.android.tools.build:gradle:9.2.1"
+      // noinspection DifferentKotlinGradleVersion
+      classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+  }
+}
+
+def reactNativeArchitectures() {
+  def value = rootProject.getProperties().get("reactNativeArchitectures")
+  return value ? value.split(",") : ["armeabi-v7a", "x86", "x86_64", "arm64-v8a"]
+}
+
+def isNewArchitectureEnabled() {
+  return (rootProject.hasProperty("newArchEnabled") && rootProject.getProperty("newArchEnabled") == "true") ||
+    (project.hasProperty("newArchEnabled") && project.getProperty("newArchEnabled") == "true")
+}
+
+def getReactNativeMinorVersion() {
+  def rnPackageJson = file("${rootProject.projectDir}/../node_modules/react-native/package.json")
+  if (!rnPackageJson.exists()) {
+    return null
+  }
+
+  def packageJson = new groovy.json.JsonSlurper().parseText(rnPackageJson.text)
+  def version = packageJson.version as String
+  def minor = version.tokenize(".")[1]
+
+  return minor?.replaceAll(/[^0-9]/, "")?.toInteger()
+}
+
+def getExtOrDefault(name, defaultValue) {
+  return rootProject.ext.has(name) ? rootProject.ext.get(name) : (project.properties["ShikiEngine_" + name] ?: defaultValue)
+}
+
+def getExtOrIntegerDefault(name, defaultValue) {
+  def value = getExtOrDefault(name, defaultValue)
+  return value instanceof Integer ? value : value.toInteger()
+}
+
+def shouldEnableAgpFallback() {
+  def agpMajorVersion = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION.tokenize('.')[0].toInteger()
+  if (agpMajorVersion <= 8) {
+    return true
+  }
+
+  def propertyVal = providers.gradleProperty("android.builtInKotlin").orNull
+  def isBuiltInKotlinEnabled = propertyVal != null ? propertyVal.toBoolean() : true
+
+  return !isBuiltInKotlinEnabled
+}
+
+apply plugin: "com.android.library"
+
+if (shouldEnableAgpFallback()) {
+  apply plugin: "kotlin-android"
+}
+
+if (isNewArchitectureEnabled()) {
+  apply plugin: "com.facebook.react"
+}
+
+android {
+  def agpVersion = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION
+  if (agpVersion.tokenize('.')[0].toInteger() >= 7) {
+    namespace "com.shikiengine"
+
+    sourceSets {
+      main {
+        manifest.srcFile "src/main/AndroidManifestNew.xml"
+      }
+    }
+  }
+
+  if (rootProject.hasProperty("ndkPath")) {
+    ndkPath rootProject.ext.ndkPath
+  }
+
+  ndkVersion getExtOrDefault("ndkVersion", "27.1.12297006")
+  compileSdkVersion getExtOrIntegerDefault("compileSdkVersion", 34)
+
+  defaultConfig {
+    minSdkVersion getExtOrIntegerDefault("minSdkVersion", 24)
+    targetSdkVersion getExtOrIntegerDefault("targetSdkVersion", 34)
+    buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
+  }
+
+  buildFeatures {
+    buildConfig true
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+    }
+  }
+
+  lintOptions {
+    disable "GradleCompatible"
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  sourceSets {
+    main {
+      if (isNewArchitectureEnabled()) {
+        java.srcDirs += [
+          "${project.buildDir}/generated/source/codegen/java",
+          "${project.buildDir}/generated/source/codegen/jni"
+        ]
+      }
+    }
+  }
+}
+
+repositories {
+  mavenCentral()
+  google()
+  maven {
+    url "$rootDir/../node_modules/react-native/android"
+  }
+}
+
+def kotlin_version = getExtOrDefault("kotlinVersion", "1.9.25")
+def reactNativeMinorVersion = getReactNativeMinorVersion()
+
+dependencies {
+  if (reactNativeMinorVersion != null && reactNativeMinorVersion <= 70) {
+    //noinspection GradleDynamicVersion
+    implementation "com.facebook.react:react-native:+"
+  } else {
+    implementation "com.facebook.react:react-android"
+  }
+
+  implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+  implementation "com.facebook.fbjni:fbjni:+"
+}
+
+if (isNewArchitectureEnabled()) {
+  react {
+    jsRootDir = file("../src/")
+    libraryName = "ShikiEngine"
+    codegenJavaPackageName = "com.shikiengine"
+  }
+
+  // Patch the auto-generated CMakeLists.txt to exclude Fabric component files
+  tasks.configureEach { task ->
+    if (task.name.contains("generateCodegenArtifactsFromSchema")) {
+      task.doLast {
+        def cmakeFile = file("${project.buildDir}/generated/source/codegen/jni/CMakeLists.txt")
+        if (cmakeFile.exists()) {
+          def content = cmakeFile.text
+          // Replace the GLOB pattern to only include TurboModule files, not Fabric components
+          content = content.replace(
+            'file(GLOB react_codegen_SRCS CONFIGURE_DEPENDS *.cpp react/renderer/components/NativeShikiEngineSpec/*.cpp)',
+            'file(GLOB react_codegen_SRCS CONFIGURE_DEPENDS *.cpp)\n# Exclude Fabric component files to avoid std::format bug'
+          )
+          cmakeFile.text = content
+          println("Patched CMakeLists.txt to exclude Fabric component files")
+        }
+      }
+    }
+  }
+}

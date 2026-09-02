@@ -1,0 +1,7 @@
+{
+  "extends": "../../.config/typescript/tsconfig.react-native.json",
+  "compilerOptions": {
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}
