@@ -17,6 +17,7 @@
     "ios",
     "android",
     "macos",
+    "windows",
     "shiki",
     "oniguruma",
     "regex",
@@ -44,6 +45,7 @@
     "apple",
     "cpp",
     "lib",
+    "windows",
     "react-native.config.js",
     "src"
   ],
