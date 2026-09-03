@@ -49,7 +49,4 @@
       <Filter>Source Files</Filter>
     </Midl>
   </ItemGroup>
-  <ItemGroup>
-    <Library Include="..\libs\onig_s.lib" />
-  </ItemGroup>
 </Project>

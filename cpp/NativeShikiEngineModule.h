@@ -16,6 +16,9 @@
 #  include <ReactCodegen/NativeShikiEngineSpecJSI.h>
 #elif __has_include(<NativeShikiEngineSpecJSI.h>)
 #  include <NativeShikiEngineSpecJSI.h>
+#elif __has_include("codegen/NativeShikiEngineSpec.g.h")
+#  include "codegen/NativeShikiEngineDataTypes.g.h"
+#  include "codegen/NativeShikiEngineSpec.g.h"
 #else
 #  error "Could not find NativeShikiEngineSpecJSI.h - ensure codegen has run and New Architecture is enabled"
 #endif
