@@ -107,7 +107,12 @@
   "codegenConfig": {
     "name": "NativeShikiEngineSpec",
     "type": "modules",
-    "jsSrcsDir": "src"
+    "jsSrcsDir": "src",
+    "windows": {
+      "namespace": "ShikiEngineCodegen",
+      "outputDirectory": "windows/ShikiEngine/codegen",
+      "separateDataTypes": true
+    }
   },
   "release-it": {
     "git": {
