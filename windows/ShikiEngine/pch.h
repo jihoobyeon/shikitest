@@ -28,6 +28,5 @@
 #include <tchar.h>
 
 // Reference additional headers your project requires here
-#pragma comment(lib, "../libs/onig_s.lib")
-#include "../../cpp/NativeShikiEngineModule.h"
+#pragma comment(lib, "../libs/onig.lib")
 #include "../../cpp/onig_regex.h"

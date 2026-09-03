@@ -8,16 +8,11 @@
 #include <optional>
 #include <unordered_set>
 
-#if __has_include(<react/renderer/components/NativeShikiEngineSpec/NativeShikiEngineSpecJSI.h>)
-#  include <react/renderer/components/NativeShikiEngineSpec/NativeShikiEngineSpecJSI.h>
-#elif __has_include(<React-Codegen/NativeShikiEngineSpecJSI.h>)
-#  include <React-Codegen/NativeShikiEngineSpecJSI.h>
-#elif __has_include(<ReactCodegen/NativeShikiEngineSpecJSI.h>)
-#  include <ReactCodegen/NativeShikiEngineSpecJSI.h>
-#elif __has_include(<NativeShikiEngineSpecJSI.h>)
-#  include <NativeShikiEngineSpecJSI.h>
+#if __has_include("codegen/NativeShikiEngineSpec.g.h")
+#  include "codegen/NativeShikiEngineDataTypes.g.h"
+#  include "codegen/NativeShikiEngineSpec.g.h"
 #else
-#  error "Could not find NativeShikiEngineSpecJSI.h - ensure codegen has run and New Architecture is enabled"
+#  error "Could not find NativeShikiEngineSpec.g.h - ensure codegen has run and New Architecture is enabled"
 #endif
 
 #if __has_include("onig_regex.h")
@@ -26,7 +21,7 @@
 
 namespace facebook::react {
 
-class NativeShikiEngineModule : public NativeShikiEngineCxxSpec<NativeShikiEngineModule> {
+class NativeShikiEngineModule {
  public:
   NativeShikiEngineModule(std::shared_ptr<CallInvoker> jsInvoker);
   ~NativeShikiEngineModule();

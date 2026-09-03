@@ -1,13 +1,11 @@
-#include "pch.h"
-#include "ShikiEngine.h"
+#include "NativeShikiEngineModule.h"
 
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-namespace winrt::ShikiEngine
-{
+namespace facebook::react {
 
 namespace {
 
@@ -38,14 +36,11 @@ namespace {
       int units = 1;
       if (c < 0x80) {
         len = 1;
-      }
-      else if ((c & 0xE0) == 0xC0) {
+      } else if ((c & 0xE0) == 0xC0) {
         len = 2;
-      }
-      else if ((c & 0xF0) == 0xE0) {
+      } else if ((c & 0xF0) == 0xE0) {
         len = 3;
-      }
-      else if ((c & 0xF8) == 0xF0) {
+      } else if ((c & 0xF8) == 0xF0) {
         len = 4;
         units = 2;
       }
@@ -70,8 +65,7 @@ namespace {
       const int mid = lo + (hi - lo) / 2;
       if (table[mid] < utf16_offset) {
         lo = mid + 1;
-      }
-      else {
+      } else {
         hi = mid;
       }
     }
@@ -89,29 +83,45 @@ namespace {
     return table[byte_offset];
   }
 
-} // namespace
+}  // namespace
 
-// See https://microsoft.github.io/react-native-windows/docs/native-platform for help writing native modules
+NativeShikiEngineModule::NativeShikiEngineModule(std::shared_ptr<CallInvoker> jsInvoker) {}
 
-void ShikiEngine::Initialize(React::ReactContext const &reactContext) noexcept {
-  m_context = reactContext;
+NativeShikiEngineModule::~NativeShikiEngineModule() {
+  std::lock_guard<std::mutex> lock(g_scanners_mutex);
+  for (const double scanner_id : owned_scanner_ids_) {
+    auto it = g_scanners.find(scanner_id);
+    if (it == g_scanners.end()) {
+      continue;
+    }
+    free_scanner(it->second);
+    g_scanners.erase(it);
+  }
+  owned_scanner_ids_.clear();
 }
 
-double ShikiEngine::createScanner(std::vector<std::string> patterns, double maxCacheSize) noexcept {
-  const size_t pattern_count = patterns.size();
-  
+jsi::Object NativeShikiEngineModule::getConstants(jsi::Runtime& rt) {
+  return jsi::Object(rt);
+}
+
+double NativeShikiEngineModule::createScanner(jsi::Runtime& rt, jsi::Array patterns, double maxCacheSize) {
+  const size_t pattern_count = patterns.length(rt);
+  std::vector<std::string> pattern_strings;
   std::vector<const char*> pattern_ptrs;
+  pattern_strings.reserve(pattern_count);
   pattern_ptrs.reserve(pattern_count);
 
-  for (const auto& pattern: patterns) {
-    pattern_ptrs.push_back(pattern.c_str());
+  for (size_t i = 0; i < pattern_count; i++) {
+    jsi::String pattern = patterns.getValueAtIndex(rt, i).asString(rt);
+    pattern_strings.push_back(pattern.utf8(rt));
+    pattern_ptrs.push_back(pattern_strings.back().c_str());
   }
 
   const size_t cache_hint = maxCacheSize > 0 ? static_cast<size_t>(maxCacheSize) : 0;
   OnigContext* context = create_scanner(pattern_ptrs.data(), static_cast<int>(pattern_count), cache_hint);
 
   if (!context) {
-    _error.Message = "Failed to create scanner";
+    throw jsi::JSError(rt, "Failed to create scanner");
   }
 
   std::lock_guard<std::mutex> lock(g_scanners_mutex);
@@ -121,19 +131,22 @@ double ShikiEngine::createScanner(std::vector<std::string> patterns, double maxC
   return scanner_id;
 }
 
-std::optional<ShikiEngineCodegen::ShikiEngineSpec_findNextMatchSync_returnType> ShikiEngine::findNextMatchSync(double scannerId, std::string text, double startPosition) noexcept {
+std::optional<jsi::Object>
+NativeShikiEngineModule::findNextMatchSync(jsi::Runtime& rt, double scannerId, jsi::String text, double startPosition) {
   OnigContext* context = nullptr;
   {
     std::lock_guard<std::mutex> lock(g_scanners_mutex);
     auto it = g_scanners.find(scannerId);
     if (it == g_scanners.end()) {
-      _error.Message = "Invalid scanner ID";
+      throw jsi::JSError(rt, "Invalid scanner ID");
     }
     context = it->second;
   }
 
+  std::string text_str = text.utf8(rt);
+
   int start_byte = 0;
-  const bool ascii = is_ascii_only(text);
+  const bool ascii = is_ascii_only(text_str);
 
   if (ascii) {
     g_last_utf8.clear();
@@ -142,27 +155,25 @@ std::optional<ShikiEngineCodegen::ShikiEngineSpec_findNextMatchSync_returnType> 
     if (start_byte < 0) {
       start_byte = 0;
     }
-  }
-  else {
-    if (text != g_last_utf8) {
-      g_last_utf8 = text;
-      g_last_b2u = build_byte_to_utf16_table(text);
+  } else {
+    if (text_str != g_last_utf8) {
+      g_last_utf8 = text_str;
+      g_last_b2u = build_byte_to_utf16_table(text_str);
     }
     start_byte = utf16_to_byte_offset(g_last_b2u, static_cast<int>(startPosition));
   }
 
-  OnigResult* result = find_next_match(context, text.c_str(), start_byte);
+  OnigResult* result = find_next_match(context, text_str.c_str(), start_byte);
   if (!result) {
     return std::nullopt;
   }
 
-  ShikiEngineCodegen::ShikiEngineSpec_findNextMatchSync_returnType match_obj;
-  match_obj.index = static_cast<double>(result->pattern_index);
+  jsi::Object match_obj(rt);
+  match_obj.setProperty(rt, "index", result->pattern_index);
 
-  std::vector<ShikiEngineCodegen::ShikiEngineSpec_findNextMatchSync_returnType_captureIndices_element> capture_indices;
-  capture_indices.reserve(result->capture_count);
+  jsi::Array capture_indices(rt, result->capture_count);
   for (int i = 0; i < result->capture_count; i++) {
-    ShikiEngineCodegen::ShikiEngineSpec_findNextMatchSync_returnType_captureIndices_element capture;
+    jsi::Object capture(rt);
     int start = result->capture_indices[i * 2];
     int end = result->capture_indices[i * 2 + 1];
 
@@ -175,19 +186,18 @@ std::optional<ShikiEngineCodegen::ShikiEngineSpec_findNextMatchSync_returnType> 
       }
     }
 
-    capture.start = static_cast<double>(start);
-    capture.end = static_cast<double>(end);
-    capture.length = static_cast<double>(end - start);
-    capture_indices.push_back(std::move(capture));
+    capture.setProperty(rt, "start", start);
+    capture.setProperty(rt, "end", end);
+    capture.setProperty(rt, "length", end - start);
+    capture_indices.setValueAtIndex(rt, i, std::move(capture));
   }
-
-  match_obj.captureIndices = std::move(capture_indices);
+  match_obj.setProperty(rt, "captureIndices", std::move(capture_indices));
 
   free_result(result);
   return match_obj;
 }
 
-void ShikiEngine::destroyScanner(double scannerId) noexcept {
+void NativeShikiEngineModule::destroyScanner(jsi::Runtime& rt, double scannerId) {
   OnigContext* context = nullptr;
   {
     std::lock_guard<std::mutex> lock(g_scanners_mutex);
@@ -202,33 +212,33 @@ void ShikiEngine::destroyScanner(double scannerId) noexcept {
   free_scanner(context);
 }
 
-void ShikiEngine::configureCache(double maxEntries, double maxMemoryBytes) noexcept {
+void NativeShikiEngineModule::configureCache(jsi::Runtime& rt, double maxEntries, double maxMemoryBytes) {
   const size_t entries = maxEntries > 0 ? static_cast<size_t>(maxEntries) : 0;
   const size_t bytes = maxMemoryBytes > 0 ? static_cast<size_t>(maxMemoryBytes) : 0;
   configure_pattern_cache(entries, bytes);
 }
 
-void ShikiEngine::clearPatternCache() noexcept {
+void NativeShikiEngineModule::clearPatternCache(jsi::Runtime& rt) {
   clear_unused_pattern_cache();
   g_last_utf8.clear();
   g_last_b2u.clear();
 }
 
-void ShikiEngine::trimMemory() noexcept {
+void NativeShikiEngineModule::trimMemory(jsi::Runtime& rt) {
   trim_pattern_cache();
   g_last_utf8.clear();
   g_last_b2u.clear();
 }
 
-ShikiEngineCodegen::ShikiEngineSpec_getCacheStats_returnType ShikiEngine::getCacheStats() noexcept {
+jsi::Object NativeShikiEngineModule::getCacheStats(jsi::Runtime& rt) {
   const OnigCacheStats stats = get_pattern_cache_stats();
-  ShikiEngineCodegen::ShikiEngineSpec_getCacheStats_returnType obj;
-  obj.entryCount = static_cast<double>(stats.entry_count);
-  obj.estimatedBytes = static_cast<double>(stats.estimated_bytes);
-  obj.scannerCount = static_cast<double>(stats.scanner_count);
-  obj.maxEntries = static_cast<double>(stats.max_entries);
-  obj.maxBytes = static_cast<double>(stats.max_bytes);
+  jsi::Object obj(rt);
+  obj.setProperty(rt, "entryCount", static_cast<double>(stats.entry_count));
+  obj.setProperty(rt, "estimatedBytes", static_cast<double>(stats.estimated_bytes));
+  obj.setProperty(rt, "scannerCount", static_cast<double>(stats.scanner_count));
+  obj.setProperty(rt, "maxEntries", static_cast<double>(stats.max_entries));
+  obj.setProperty(rt, "maxBytes", static_cast<double>(stats.max_bytes));
   return obj;
 }
 
-} // namespace winrt::ShikiEngine
+}  // namespace facebook::react
