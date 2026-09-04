@@ -46,7 +46,7 @@
     "cpp",
     "lib",
     "windows",
-    "*.lib"
+    "*.lib",
     "react-native.config.js",
     "src"
   ],
